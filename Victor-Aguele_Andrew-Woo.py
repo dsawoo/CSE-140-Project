@@ -10,6 +10,8 @@ Functions to implement:
   • Mem()         : Handles data memory accesses (for lw and sw).
   • Writeback()   : Writes back ALU or memory results to the register file and increments the cycle counter.
   • ControlUnit() : Generates control signals based on the decoded instruction.
+  • ALU()         : Performs the operations specified by op on operand1 and operand2
+  
 
 
 
@@ -97,5 +99,64 @@ def determineMnemonic(machineCode, type):
     elif type == "UJ":
         return "jal"
 
+def parse_instruction(machineCode):
+    
+def Fetch(program):
+
+def Decode(instructions):
+    
+
+def ALU(op, operand1, operand2):
 
 
+def Execute(decoded, signals):
+
+
+def Mem(alu_result, decoded, signals):
+
+def Writeback(decoded, signals, alu_result, mem_data):
+
+def ControlUnit(decoded):
+    
+    
+    
+    
+    
+    
+
+def main():
+    global pc, total_clock_cycles, rf, d_mem
+    filename = input("Enter the program file name to run:\n")
+    try:
+        with open(filename, "r") as f:
+            program = f.readlines()
+    except Exception as e:
+        print("Error reading file:", e)
+        return
+
+    # Remove blank lines from the program.
+    program = [line.strip() for line in program if line.strip() != ""]
+
+    #initializatize all registers and memory start at 0.
+    rf = [0] * 32
+    d_mem = [0] * 32
+
+
+    # Run simulation until all instructions are processed.
+    while True:
+        instr = Fetch(program)
+        if instr is None:
+            break
+        decoded = Decode(instr)
+        signals = ControlUnit(decoded)
+        alu_result = Execute(decoded, signals)
+        mem_data = Mem(alu_result, decoded, signals)
+        Writeback(decoded, signals, alu_result, mem_data)
+    
+    print("program terminated:")
+    print(f"total execution time is {total_clock_cycles} cycles")
+
+if __name__ == "__main__":
+    main()
+
+        
