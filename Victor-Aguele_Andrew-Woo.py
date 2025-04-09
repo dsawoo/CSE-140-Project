@@ -30,140 +30,251 @@ next_pc = 0
 branch_target = 0
 total_clock_cycles = 0
 alu_zero = 0
-rf = [0] * 32
-d_mem = [0] * 32
-current_instr_pc = 0
+rf = [0] * 32         # 32-entry register file
+d_mem = [0] * 32      # 32-entry data memory; each entry is 4 bytes
+current_instr_pc = 0  # holds the PC of the instruction being executed
 
 
-def parse_instruction(machineCode):
-    pass
+DEBUG = True  # Set to False to disable debug prints
 
 def Fetch(program):
-    global pc, next_pc, branch_target
+    global pc, next_pc, branch_target, current_instr_pc
+    current_instr_pc = pc  
     next_pc = pc + 4
     instruction = program[pc // 4]
+    if DEBUG:
+        print(f"[Fetch] PC = {pc} -> Fetched Instruction: {instruction}")
     pc = next_pc
+    if DEBUG:
+        print(f"[Fetch] Updated PC = {pc}")
     return instruction
 
+
 def Decode(instruction):
-    #convert binary string to int
-    #ensure negative # are correctly represented when using fixed number of bits
-    #Andrew
+    # Helper function to sign extend a binary string.
     def sign_extend(binary_string, num_bits):
         x = int(binary_string, 2)
         if binary_string[0] == '1':
             x -= 2 ** num_bits
         return x
 
-    #Victor
+    # Function to determine instruction type
     def determineInstructionType(machineCode):
-        opcodes = {"0110011": "R", 
-                "0000011": "I", "0010011": "I", "1100111": "I",
-                "0100011": "S", 
-                "1100011": "SB", 
-                "1101111": "UJ"
-                }
+        opcodes = {
+            "0110011": "R", 
+            "0000011": "I", "0010011": "I", "1100111": "I",
+            "0100011": "S", 
+            "1100011": "SB", 
+            "1101111": "UJ"
+        }
         return opcodes[machineCode[25:]]
 
-    #Victor
+    # Function to determine mnemonic
     def determineMnemonic(machineCode, type):
         if type == "R":
-            funct_3_7 = {"0000000000": "add", "0000100000": "sub", "0010000000": "sll",
-                        "0100000000": "slt", "0110000000": "sltu", "1000000000": "xor",
-                        "1010000000": "srl", "1010100000": "sra", "1100000000": "or",
-                        "1110000000": "and"    
-                        }
+            funct_3_7 = {
+                "0000000000": "add", 
+                "0000100000": "sub", 
+                "0010000000": "sll",
+                "0100000000": "slt", 
+                "0110000000": "sltu", 
+                "1000000000": "xor",
+                "1010000000": "srl", 
+                "1010100000": "sra", 
+                "1100000000": "or",
+                "1110000000": "and"    
+            }
             return funct_3_7[machineCode[17:20] + machineCode[:7]]
-        
         elif type == "I" and machineCode[25:] == "0000011":
             funct3 = {"000": "lb", "001": "lh", "010": "lw"}
             return funct3[machineCode[17:20]]
-        
         elif type == "I" and machineCode[25:] == "0010011":
-            if machineCode[:12] == "000000000000" or machineCode[:12] == "010000000000":
-                funct_3_imm = {"1010000000": "srli", "1010100000": "srai"}
-                return funct_3_imm[machineCode[17:20] + machineCode[0:12]]
-            else:
-                funct3 = {"000": "addi", "001": "slli", "010": "slti", "011": "sltiu", "100": "xori",
-                            "110": "ori", "111": "andi"
-                        }
-                return funct3[machineCode[17:20]]
-
+            funct3 = {"000": "addi", "001": "slli", "010": "slti", "011": "sltiu",
+                      "100": "xori", "110": "ori", "111": "andi"}
+            return funct3[machineCode[17:20]]
         elif type == "I" and machineCode[25:] == "1100111":
             return "jalr"
-
         elif type == "S":
             funct3 = {"000": "sb", "001": "sh", "010": "sw", "011": "sd"}
             return funct3[machineCode[17:20]]
-        
         elif type == "SB":
             funct3 = {"000": "beq", "001": "bne", "100": "blt", "101": "bge"}
             return funct3[machineCode[17:20]]
-        
         elif type == "UJ":
             return "jal"
 
-    #Andrew
-    def determineRegisters(machineCode, type):
-        if type == "R":
-            print(f"Rs1: x{int(machineCode[12:17], 2)}")
-            print(f"Rs2: x{int(machineCode[7:12], 2)}")
-            print(f"Rd: x{int(machineCode[20:25], 2)}")
-            print("Funct3:", int(machineCode[17:20],2))
-            print("Funct7:", int(machineCode[:7], 2))
-
-        elif type == "I":
-            print(f"Rs1: x{int(machineCode[12:17], 2)}")
-            print(f"Rd: x{int(machineCode[20:25], 2)}")
-            imm = sign_extend(machineCode[0:12], 12)
-            print(f"Immediate: {imm} (or 0x{imm & (2**12 - 1):X})")
-
-        elif type == "S":
-            print(f"Rs1: x{int(machineCode[12:17], 2)}")
-            print(f"Rs2: x{int(machineCode[7:12], 2)}")
-            imm_binary = machineCode[0:7] + machineCode[20:25]
-            imm = sign_extend(imm_binary, 12)
-            print(f"Immediate: {imm} (or 0x{imm & (2**12 - 1):X})")
-
-        elif type == "SB":
-            print(f"Rs1: x{int(machineCode[12:17], 2)}")
-            print(f"Rs2: x{int(machineCode[7:12], 2)}")
-            imm_binary = machineCode[0] + machineCode[1] + machineCode[1:7] + machineCode[20:24]  + "0"
-            imm = sign_extend(imm_binary, 13)
-            print(f"Immediate: {imm}")
-            
-        elif type == "UJ":
-            print(f"Rd: x{int(machineCode[20:25], 2)}")
-            imm_binary = machineCode[0] + machineCode[12:20] + machineCode[11] + machineCode[1:11] + "0"
-            imm = sign_extend(imm_binary, 21)
-            print(f"Immediate: {imm} (or 0x{int(imm) & (2**21 - 1):X})")
-            
-    #Victor
-    machineCode = instruction
+    machineCode = instruction.strip()
     type = determineInstructionType(machineCode)
-    print("Instruction Type: " + type)
     mnemonic = determineMnemonic(machineCode, type)
-    print("Operation: " + mnemonic)
-    determineRegisters(machineCode, type)
+    decoded = {"type": type, "mnemonic": mnemonic}
 
-def ALU(op, operand1, operand2):
-    pass
+    if type == "R":
+        decoded["rs1"] = int(machineCode[12:17], 2)
+        decoded["rs2"] = int(machineCode[7:12], 2)
+        decoded["rd"]  = int(machineCode[20:25], 2)
+        decoded["imm"] = None
+    elif type == "I":
+        decoded["rs1"] = int(machineCode[12:17], 2)
+        decoded["rd"]  = int(machineCode[20:25], 2)
+        decoded["imm"] = sign_extend(machineCode[0:12], 12)
+    elif type == "S":
+        decoded["rs1"] = int(machineCode[12:17], 2)
+        decoded["rs2"] = int(machineCode[7:12], 2)
+        imm_binary = machineCode[0:7] + machineCode[20:25]
+        decoded["imm"] = sign_extend(imm_binary, 12)
+    elif type == "SB":
+        decoded["rs1"] = int(machineCode[12:17], 2)
+        decoded["rs2"] = int(machineCode[7:12], 2)
+        imm_binary = machineCode[0] + machineCode[24] + machineCode[1:7] + machineCode[20:24] + "0"
+        decoded["imm"] = sign_extend(imm_binary, 13)
+    elif type == "UJ":
+        decoded["rd"] = int(machineCode[20:25], 2)
+        imm_binary = machineCode[0] + machineCode[12:20] + machineCode[11] + machineCode[1:11] + "0"
+        decoded["imm"] = sign_extend(imm_binary, 21)
+
+    if DEBUG:
+        print(f"[Decode] Decoded Instruction: {decoded}")
+    return decoded
+
+
+
 
 def Execute(decoded, signals):
-    pass
+    global rf, pc, current_instr_pc, branch_target, alu_zero
+    operand1 = rf[decoded["rs1"]]
+    if signals.get("ALUSrc", 0) == 1:
+        operand2 = decoded["imm"]
+    else:
+        operand2 = rf[decoded["rs2"]] if "rs2" in decoded else 0
+    
+    if DEBUG:
+        print(f"[Execute] Operand1 (rf[{decoded['rs1']}]) = {operand1}")
+        print(f"[Execute] Operand2 = {operand2}")
+    
+    alu_result = ALU(signals["ALUControl"], operand1, operand2)
+    
+    if DEBUG:
+        print(f"[Execute] ALU Operation: {signals['ALUControl']} -> Result = {alu_result}")
+    
+    if signals.get("Branch", 0) == 1 and alu_zero == 1:
+        branch_target = (current_instr_pc + 4) + (decoded["imm"] << 1)
+        pc = branch_target
+        if DEBUG:
+            print(f"[Execute] Branch taken. New PC = {pc}")
+    
+    return alu_result
+
 
 def Mem(alu_result, decoded, signals):
-    pass
+    global d_mem, rf
+    if signals.get("MemRead", 0) == 1:
+        index = alu_result // 4
+        if 0 <= index < len(d_mem):
+            data = d_mem[index]
+            if DEBUG:
+                print(f"[Mem] lw: Reading data {data} from memory index {index}")
+            return data
+        else:
+            print("Memory Read Error: Address out of bounds")
+            return 0
+    elif signals.get("MemWrite", 0) == 1:
+        index = alu_result // 4
+        if 0 <= index < len(d_mem):
+            d_mem[index] = rf[decoded["rs2"]]
+            if DEBUG:
+                print(f"[Mem] sw: Writing data {rf[decoded['rs2']]} to memory index {index}")
+        else:
+            print("Memory Write Error: Address out of bounds")
+    return None
 
 def Writeback(decoded, signals, alu_result, mem_data):
-    pass
+    global total_clock_cycles, rf, pc
+    total_clock_cycles += 1
+    mnemonic = decoded["mnemonic"]
+    value = mem_data if signals.get("MemToReg", 0) == 1 else alu_result
+
+    if signals.get("RegWrite", 0) == 1 and "rd" in decoded and decoded["rd"] != 0:
+        rf[decoded["rd"]] = value
+        if DEBUG:
+            print(f"[WriteBack] Cycle {total_clock_cycles}: Register x{decoded['rd']} updated to {value}")
+    elif signals.get("MemWrite", 0) == 1:
+        if DEBUG:
+            print(f"[WriteBack] Cycle {total_clock_cycles}: Memory write completed")
+    else:
+        if DEBUG:
+            print(f"[WriteBack] Cycle {total_clock_cycles}: No register update (mnemonic: {mnemonic})")
+    
+    if DEBUG:
+        print(f"[WriteBack] Updated PC = {pc}\n")
+
+
+
+
+def ALU(op, operand1, operand2):
+    global alu_zero
+    result = 0
+    if op == "add":
+        result = operand1 + operand2
+    elif op == "sub":
+        result = operand1 - operand2
+        alu_zero = 1 if result == 0 else 0
+    elif op == "and":
+        result = operand1 & operand2
+    elif op == "or":
+        result = operand1 | operand2
+    else:
+        print("ALU: Unsupported operation", op)
+    return result
+
 
 def ControlUnit(decoded):
-    pass
-    
+    mnemonic = decoded["mnemonic"]
+    signals = {}
+    # Defaults
+    signals["RegWrite"] = 0
+    signals["MemRead"] = 0
+    signals["MemWrite"] = 0
+    signals["ALUSrc"] = 0
+    signals["Branch"] = 0
+    signals["MemToReg"] = 0
+    # Set control signals based on instruction type
+    if mnemonic == "lw":
+        signals["RegWrite"] = 1
+        signals["MemRead"] = 1
+        signals["ALUSrc"] = 1
+        signals["MemToReg"] = 1
+        signals["ALUControl"] = "add"
+    elif mnemonic == "sw":
+        signals["MemWrite"] = 1
+        signals["ALUSrc"] = 1
+        signals["ALUControl"] = "add"
+    elif mnemonic in ["add", "sub", "and", "or"]:
+        signals["RegWrite"] = 1
+        signals["ALUSrc"] = 0
+        signals["ALUControl"] = mnemonic  # direct mapping
+    elif mnemonic in ["addi", "andi", "ori"]:
+        signals["RegWrite"] = 1
+        signals["ALUSrc"] = 1
+        # For addi, andi, ori, the ALU operation is the same as their mnemonic without the "i"
+        if mnemonic == "addi":
+            signals["ALUControl"] = "add"
+        elif mnemonic == "andi":
+            signals["ALUControl"] = "and"
+        elif mnemonic == "ori":
+            signals["ALUControl"] = "or"
+    elif mnemonic == "beq":
+        signals["Branch"] = 1
+        signals["ALUSrc"] = 0
+        signals["ALUControl"] = "sub"  # to check for equality
+    else:
+        print("ControlUnit: Unsupported instruction", mnemonic)
+    return signals
+
+
+
 
 def main():
-    global pc, total_clock_cycles, rf, d_mem
+    global rf, d_mem, pc, total_clock_cycles, branch_target
     filename = input("Enter the program file name to run:\n")
     try:
         with open(filename, "r") as f:
@@ -175,26 +286,46 @@ def main():
     # Remove blank lines from the program.
     program = [line.strip() for line in program if line.strip() != ""]
 
-    #initializatize all registers and memory start at 0.
     rf = [0] * 32
+    rf[1] = 0x20
+    rf[2] = 0x5
+    rf[10] = 0x70
+    rf[11] = 0x4
+
     d_mem = [0] * 32
+    # Initialize memory:
+    # Address 0x70 corresponds to index 0x70//4 = 28.
+    # Address 0x74 corresponds to index 29.
+    d_mem[28] = 0x5
+    d_mem[29] = 0x10
+
+    # Reset PC and cycle counter
+    pc = 0
+    total_clock_cycles = 0
 
     # Run simulation until all instructions are processed.
     while True:
         instr = Fetch(program)
-        print(instr)
-        if pc // 4  >= len(program):
+        # Optionally, print the fetched instruction.
+        #print("Fetched Instruction:", instr)
+        
+        # End simulation when PC points beyond the program.
+        if (pc // 4) > len(program):
             break
         decoded = Decode(instr)
         signals = ControlUnit(decoded)
         alu_result = Execute(decoded, signals)
         mem_data = Mem(alu_result, decoded, signals)
         Writeback(decoded, signals, alu_result, mem_data)
+        # If PC now points beyond the program, break.
+        if (pc // 4) >= len(program):
+            break
 
     print("program terminated")
     print(f"total execution time is {total_clock_cycles} cycles")
 
 if __name__ == "__main__":
     main()
+
 
         
