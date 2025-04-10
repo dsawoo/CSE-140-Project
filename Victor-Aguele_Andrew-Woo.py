@@ -153,7 +153,7 @@ def Decode(instruction):
 
 
 
-
+#handles acutal computation specified by the instruction
 def Execute(decoded, signals):
     global rf, pc, current_instr_pc, branch_target, alu_zero
 
@@ -193,7 +193,7 @@ def Execute(decoded, signals):
     return alu_result
 
 
-
+#handles data memory accesses(load and store)
 def Mem(alu_result, decoded, signals):
     global d_mem, rf
 
@@ -236,7 +236,7 @@ def Mem(alu_result, decoded, signals):
     # Return None if no memory operation is performed.
     return None
 
-
+#update the register file
 def Writeback(decoded, signals, alu_result, mem_data):
     global total_clock_cycles, rf, pc
 
