@@ -25,29 +25,44 @@ Global Variables:
 
 
 #Global Variables
-pc = 0
-next_pc = 0
-branch_target = 0
-total_clock_cycles = 0
-alu_zero = 0
-rf = [0] * 32         # 32-entry register file
-d_mem = [0] * 32      # 32-entry data memory; each entry is 4 bytes
-current_instr_pc = 0  # holds the PC of the instruction being executed
+pc = 0                   # Program Counter: holds the memory address of the current instruction to be fetched.
+next_pc = 0              # Next Program Counter: stores the computed address for the next instruction (usually pc + 4).
+branch_target = 0        # Branch Target: holds the target address when a branch instruction (e.g., beq) is taken.
+total_clock_cycles = 0   # Total Clock Cycles: counts the number of instruction cycles (or ticks) that have been executed.
+alu_zero = 0             # ALU Zero Flag: indicates whether the result from the ALU is zero 
+rf = [0] * 32            # 32-entry register file
+d_mem = [0] * 32         # 32-entry data memory; each entry is 4 bytes
+current_instr_pc = 0     # holds the PC of the instruction being executed
 
 
 DEBUG = True  # Set to False to disable debug prints
 
 def Fetch(program):
     global pc, next_pc, branch_target, current_instr_pc
-    current_instr_pc = pc  
+
+    # Store the current value of the program counter in current_instr_pc.
+    current_instr_pc = pc
+    
+    # Compute the next instruction's address by adding 4 to the current PC.
+    # Instructions are 4 bytes long, so we increment by 4.
     next_pc = pc + 4
+    
+    # Fetch the instruction from the program using the current program counter.
+    # Since pc is in bytes, dividing by 4 converts it to the correct index in the program list.
     instruction = program[pc // 4]
+    
     if DEBUG:
         print(f"[Fetch] PC = {pc} -> Fetched Instruction: {instruction}")
+    
+    # Update the global program counter to the next instruction's address.
     pc = next_pc
+    
     if DEBUG:
         print(f"[Fetch] Updated PC = {pc}")
+    
+    # Return the fetched instruction 
     return instruction
+
 
 
 def Decode(instruction):
@@ -141,90 +156,158 @@ def Decode(instruction):
 
 def Execute(decoded, signals):
     global rf, pc, current_instr_pc, branch_target, alu_zero
+
+    # Select the first operand from the register file (rf) using the register index provided in the decoded instruction.
     operand1 = rf[decoded["rs1"]]
+
+    # Check if the control signal 'ALUSrc' is active 
+    # If it is active, the second operand will be the immediate value from the decoded instruction.
     if signals.get("ALUSrc", 0) == 1:
         operand2 = decoded["imm"]
     else:
+        # If 'ALUSrc' is not active, use the second register value from the register file.
         operand2 = rf[decoded["rs2"]] if "rs2" in decoded else 0
-    
+
     if DEBUG:
         print(f"[Execute] Operand1 (rf[{decoded['rs1']}]) = {operand1}")
         print(f"[Execute] Operand2 = {operand2}")
-    
+
+    # Call the ALU function with the specified operation then store results
     alu_result = ALU(signals["ALUControl"], operand1, operand2)
-    
+
     if DEBUG:
         print(f"[Execute] ALU Operation: {signals['ALUControl']} -> Result = {alu_result}")
-    
+
+    # check if the Branch control signal is active AND if the result of ALU is 0
     if signals.get("Branch", 0) == 1 and alu_zero == 1:
+        # Calculate the branch target: starting from the current instruction's PC, add 4 (next sequential instruction),
+        # then add the shifted left immediate 
         branch_target = (current_instr_pc + 4) + (decoded["imm"] << 1)
+        # Update the global program counter (pc) to the branch target address to simulate a jump.
         pc = branch_target
+        
         if DEBUG:
             print(f"[Execute] Branch taken. New PC = {pc}")
-    
+
+    # Return the result from the ALU operation 
     return alu_result
+
 
 
 def Mem(alu_result, decoded, signals):
     global d_mem, rf
+
+    # Check if the instruction involves a memory read operation (lw).
     if signals.get("MemRead", 0) == 1:
+        # Calculate the memory index from the effective address.
+        # Since each memory entry is 4 bytes, divide by 4 
         index = alu_result // 4
+        
+        # Ensure that the computed index is within the bounds of the data memory array.
         if 0 <= index < len(d_mem):
+            # Read the data stored at the computed index in memory.
             data = d_mem[index]
+            
             if DEBUG:
                 print(f"[Mem] lw: Reading data {data} from memory index {index}")
+                
+            # Return the read data to be used in the Writeback stage.
             return data
         else:
             print("Memory Read Error: Address out of bounds")
             return 0
+
+    # If the instruction is a memory write (sw) 
     elif signals.get("MemWrite", 0) == 1:
+        # Calculate the memory index using the ALU result, the same way as for memory reads.
         index = alu_result // 4
+        
+        # Check if the calculated index is within the valid range of memory addresses.
         if 0 <= index < len(d_mem):
+            # Write data to the memory: take the value from the source register (rs2) in the decoded instruction.
             d_mem[index] = rf[decoded["rs2"]]
+            
             if DEBUG:
                 print(f"[Mem] sw: Writing data {rf[decoded['rs2']]} to memory index {index}")
         else:
+            
             print("Memory Write Error: Address out of bounds")
+    
+    # Return None if no memory operation is performed.
     return None
+
 
 def Writeback(decoded, signals, alu_result, mem_data):
     global total_clock_cycles, rf, pc
+
+    # Increment the cycle counter to record total cycles for instruction
     total_clock_cycles += 1
+
+    # Retrieve the mnemonic of the instruction from the decoded dictionary 
     mnemonic = decoded["mnemonic"]
+
+    # If the MemToReg signal is active, use the memory data (for load instructions),
+    # otherwise, use the ALU result (for arithmetic or logical instructions).
     value = mem_data if signals.get("MemToReg", 0) == 1 else alu_result
 
+    # If the instruction requires writing back to a register (RegWrite is active),
+    # and there is a destination register specified ("rd" exists in decoded)
+    # and the destination register is not 0 (register 0 is usually constant zero),
+    # then perform the register update.
     if signals.get("RegWrite", 0) == 1 and "rd" in decoded and decoded["rd"] != 0:
+        # Update the register file: set the destination register to the computed value.
         rf[decoded["rd"]] = value
+       
         if DEBUG:
             print(f"[WriteBack] Cycle {total_clock_cycles}: Register x{decoded['rd']} updated to {value}")
+
+    # if a memory write is performed (indicated by MemWrite signal),
     elif signals.get("MemWrite", 0) == 1:
         if DEBUG:
             print(f"[WriteBack] Cycle {total_clock_cycles}: Memory write completed")
+
+    # If neither a register update nor a memory write occurred,
     else:
         if DEBUG:
             print(f"[WriteBack] Cycle {total_clock_cycles}: No register update (mnemonic: {mnemonic})")
-    
+
     if DEBUG:
         print(f"[WriteBack] Updated PC = {pc}\n")
 
 
 
 
+
 def ALU(op, operand1, operand2):
     global alu_zero
+    # Initialize the result to 0.
     result = 0
+
+    # Check the operation type specified by 'op'.
     if op == "add":
+        # If the operation is addition, add operand1 and operand2.
         result = operand1 + operand2
     elif op == "sub":
+        # For subtraction, subtract operand2 from operand1.
         result = operand1 - operand2
+        
+        # Set the alu_zero flag to 1 if the result is zero, else set it to 0.
+        # This is used to determine equality (for example, in branch instructions like beq).
         alu_zero = 1 if result == 0 else 0
+        
     elif op == "and":
+        # For logical AND, perform bitwise AND on operand1 and operand2.
         result = operand1 & operand2
     elif op == "or":
+        # For logical OR, perform bitwise OR on operand1 and operand2.
         result = operand1 | operand2
     else:
+        # If the operation is not supported, print an error message.
         print("ALU: Unsupported operation", op)
+    
+    # Return the computed result.
     return result
+
 
 
 def ControlUnit(decoded):
