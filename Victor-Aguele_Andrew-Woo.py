@@ -157,8 +157,26 @@ def Decode(instruction):
 def Execute(decoded, signals):
     global rf, pc, current_instr_pc, branch_target, alu_zero
 
+    # Handle special instruction types directly (e.g., jal, lui)
+    instr_type = decoded["type"]
+    mnemonic = decoded["mnemonic"]
+
+    # Handle UJ-type (e.g., jal)
+    if instr_type == "UJ" and mnemonic == "jal":
+        rf[decoded["rd"]] = pc  # Save return address in rd
+        pc = current_instr_pc + decoded["imm"]  # Jump to immediate offset from current PC
+        if DEBUG:
+            print(f"[Execute] jal: rf[{decoded['rd']}] = {rf[decoded['rd']]}, new PC = {pc}")
+        return None
+
     # Select the first operand from the register file (rf) using the register index provided in the decoded instruction.
-    operand1 = rf[decoded["rs1"]]
+    if "rs1" in decoded:
+        if rf[decoded["rs1"]] == None:
+            operand1 = 0
+        else:
+            operand1 = rf[decoded["rs1"]]
+    else:
+        operand1 = 0  # Default if rs1 not present
 
     # Check if the control signal 'ALUSrc' is active 
     # If it is active, the second operand will be the immediate value from the decoded instruction.
@@ -169,11 +187,13 @@ def Execute(decoded, signals):
         operand2 = rf[decoded["rs2"]] if "rs2" in decoded else 0
 
     if DEBUG:
-        print(f"[Execute] Operand1 (rf[{decoded['rs1']}]) = {operand1}")
+        if "rs1" in decoded:
+            print(f"[Execute] Operand1 (rf[{decoded['rs1']}]) = {operand1}")
         print(f"[Execute] Operand2 = {operand2}")
 
     # Call the ALU function with the specified operation then store results
     alu_result = ALU(signals["ALUControl"], operand1, operand2)
+    alu_zero = (alu_result == 0)
 
     if DEBUG:
         print(f"[Execute] ALU Operation: {signals['ALUControl']} -> Result = {alu_result}")
@@ -191,6 +211,7 @@ def Execute(decoded, signals):
 
     # Return the result from the ALU operation 
     return alu_result
+
 
 
 #handles data memory accesses(load and store)
@@ -349,11 +370,25 @@ def ControlUnit(decoded):
         signals["Branch"] = 1
         signals["ALUSrc"] = 0
         signals["ALUControl"] = "sub"  # to check for equality
+    elif mnemonic == "jal":
+        signals["RegWrite"] = 1
+        signals["MemRead"] = 0
+        signals["MemWrite"] = 0
+        signals["ALUSrc"] = 1
+        signals["Branch"] = 0
+        signals["MemToReg"] = 0
+        signals["ALUControl"] = "add"
+    elif mnemonic == "jalr":
+        signals["RegWrite"] = 1
+        signals["MemRead"] = 0
+        signals["MemWrite"] = 0
+        signals["ALUSrc"] = 1
+        signals["Branch"] = 0
+        signals["MemToReg"] = 0
+        signals["ALUControl"] = "add"
     else:
         print("ControlUnit: Unsupported instruction", mnemonic)
     return signals
-
-
 
 
 def main():
