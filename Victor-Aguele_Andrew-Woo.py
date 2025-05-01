@@ -157,18 +157,6 @@ def Decode(instruction):
 def Execute(decoded, signals):
     global rf, pc, current_instr_pc, branch_target, alu_zero
 
-    # Handle special instruction types directly (e.g., jal, lui)
-    instr_type = decoded["type"]
-    mnemonic = decoded["mnemonic"]
-
-    # Handle UJ-type (e.g., jal)
-    if instr_type == "UJ" and mnemonic == "jal":
-        rf[decoded["rd"]] = pc  # Save return address in rd
-        pc = current_instr_pc + decoded["imm"]  # Jump to immediate offset from current PC
-        if DEBUG:
-            print(f"[Execute] jal: rf[{decoded['rd']}] = {rf[decoded['rd']]}, new PC = {pc}")
-        return None
-
     # Select the first operand from the register file (rf) using the register index provided in the decoded instruction.
     if "rs1" in decoded:
         if rf[decoded["rs1"]] == None:
@@ -382,7 +370,7 @@ def ControlUnit(decoded):
         signals["MemRead"] = 0
         signals["MemWrite"] = 0
         signals["ALUSrc"] = 1
-        signals["Branch"] = 0
+        signals["Branch"] = 1
         signals["MemToReg"] = 0
         signals["ALUControl"] = "add"
     elif mnemonic == "jalr":
@@ -429,22 +417,18 @@ def main():
     total_clock_cycles = 0
 
     # Run simulation until all instructions are processed.
-    while True:
+    # End simulation when PC points beyond the program.
+
+    while (pc // 4) < len(program):
         instr = Fetch(program)
         # Optionally, print the fetched instruction.
         #print("Fetched Instruction:", instr)
-        
-        # End simulation when PC points beyond the program.
-        if (pc // 4) > len(program):
-            break
         decoded = Decode(instr)
         signals = ControlUnit(decoded)
         alu_result = Execute(decoded, signals)
         mem_data = Mem(alu_result, decoded, signals)
         Writeback(decoded, signals, alu_result, mem_data)
         # If PC now points beyond the program, break.
-        if (pc // 4) >= len(program):
-            break
 
     print("program terminated")
     print(f"total execution time is {total_clock_cycles} cycles")
