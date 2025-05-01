@@ -35,7 +35,7 @@ d_mem = [0] * 32         # 32-entry data memory; each entry is 4 bytes
 current_instr_pc = 0     # holds the PC of the instruction being executed
 
 
-DEBUG = True  # Set to False to disable debug prints
+DEBUG = False  # Set to False to disable debug prints
 
 def Fetch(program):
     global pc, next_pc, branch_target, current_instr_pc
@@ -261,39 +261,46 @@ def Mem(alu_result, decoded, signals):
 def Writeback(decoded, signals, alu_result, mem_data):
     global total_clock_cycles, rf, pc
 
-    # Increment the cycle counter to record total cycles for instruction
+    # 1) increment cycle counter
     total_clock_cycles += 1
 
-    # Retrieve the mnemonic of the instruction from the decoded dictionary 
-    mnemonic = decoded["mnemonic"]
+    # 2) figure out what actually got written
+    #    and apply it to rf or d_mem
+    modifications = []
 
-    # If the MemToReg signal is active, use the memory data (for load instructions),
-    # otherwise, use the ALU result (for arithmetic or logical instructions).
-    value = mem_data if signals.get("MemToReg", 0) == 1 else alu_result
+    # compute the write-back value (for loads vs. ALU ops)
+    write_val = mem_data if signals.get("MemToReg", 0) == 1 else alu_result
 
-    # If the instruction requires writing back to a register (RegWrite is active),
-    # and there is a destination register specified ("rd" exists in decoded)
-    # and the destination register is not 0 (register 0 is usually constant zero),
-    # then perform the register update.
-    if signals.get("RegWrite", 0) == 1 and "rd" in decoded and decoded["rd"] != 0:
-        # Update the register file: set the destination register to the computed value.
-        rf[decoded["rd"]] = value
-       
-        if DEBUG:
-            print(f"[WriteBack] Cycle {total_clock_cycles}: Register x{decoded['rd']} updated to {value}")
+    # register write
+    if signals.get("RegWrite", 0) == 1 and decoded.get("rd", None) not in (None, 0):
+        rd = decoded["rd"]
+        rf[rd] = write_val
+        modifications.append(f"x{rd} is modified to {hex(write_val)}")
 
-    # if a memory write is performed (indicated by MemWrite signal),
+    # memory write (sw)
     elif signals.get("MemWrite", 0) == 1:
-        if DEBUG:
-            print(f"[WriteBack] Cycle {total_clock_cycles}: Memory write completed")
+        # address is ALU result
+        addr = alu_result
+        # value to store is in rs2
+        val = rf[decoded["rs2"]]
+        # write it
+        index = addr // 4
+        if 0 <= index < len(d_mem):
+            d_mem[index] = val
+            modifications.append(f"memory {hex(addr)} is modified to {hex(val)}")
+        else:
+            print("Memory Write Error: Address out of bounds")
 
-    # If neither a register update nor a memory write occurred,
-    else:
-        if DEBUG:
-            print(f"[WriteBack] Cycle {total_clock_cycles}: No register update (mnemonic: {mnemonic})")
+    # 3) always report the new PC
+    modifications.append(f"pc is modified to {hex(pc)}")
 
-    if DEBUG:
-        print(f"[WriteBack] Updated PC = {pc}\n")
+    # 4) print the summary exactly once, in the desired format
+    print(f"total_clock_cycles {total_clock_cycles} :")
+    for m in modifications:
+        print(m)
+    print()
+
+
 
 
 
