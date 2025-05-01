@@ -387,54 +387,64 @@ def ControlUnit(decoded):
 
 
 def main():
-    global rf, d_mem, pc, total_clock_cycles, branch_target
-    filename = input("Enter the program file name to run:\n")
+    global rf, d_mem, pc, total_clock_cycles
+    filename = input("Enter the program file name to run:\n").strip()
+
     try:
-        with open(filename, "r") as f:
-            program = f.readlines()
+        with open(filename) as f:
+            program = [l.strip() for l in f if l.strip()]
     except Exception as e:
         print("Error reading file:", e)
         return
 
-    # Remove blank lines from the program.
-    program = [line.strip() for line in program if line.strip() != ""]
-
-    rf = [0] * 32
-    rf[1] = 0x20
-    rf[2] = 0x5
-    rf[10] = 0x70
-    rf[11] = 0x4
-
-    d_mem = [0] * 32
-    # Initialize memory:
-    # Address 0x70 corresponds to index 0x70//4 = 28.
-    # Address 0x74 corresponds to index 29.
-    d_mem[28] = 0x5
-    d_mem[29] = 0x10
-
-    # Reset PC and cycle counter
+    # reset
+    rf    = [0]*32
+    d_mem = [0]*32
     pc = 0
     total_clock_cycles = 0
 
-    # Run simulation until all instructions are processed.
-    # End simulation when PC points beyond the program.
+    # part1 vs part2 initial state
+    if filename.endswith("sample_part1.txt"):
+        # s0=0x20, a0=0x70, a1=0x4, plus d_mem for part1
+        rf[8]  = 0x20     # s0
+        rf[10] = 0x70     # a0
+        rf[11] = 0x4      # a1
+        d_mem[28] = 0x5   # at addr 0x70//4
+        d_mem[29] = 0x10  # at addr 0x74//4
 
-    while (pc // 4) < len(program):
+    else:
+        # sample_part2.txt: s0=0x20, a0=0x5, a1=0x2, a2=0xa, a3=0xf
+        rf[8]  = 0x20     # s0
+        rf[10] = 0x5      # a0
+        rf[11] = 0x2      # a1
+        rf[12] = 0xa      # a2
+        rf[13] = 0xf      # a3
+        # leave d_mem all zeros
+
+    # run
+    while True:
         instr = Fetch(program)
-        # Optionally, print the fetched instruction.
-        #print("Fetched Instruction:", instr)
-        decoded = Decode(instr)
-        signals = ControlUnit(decoded)
-        alu_result = Execute(decoded, signals)
-        mem_data = Mem(alu_result, decoded, signals)
-        Writeback(decoded, signals, alu_result, mem_data)
-        # If PC now points beyond the program, break.
+        if (pc//4) > len(program): break
+
+        decoded   = Decode(instr)
+        signals   = ControlUnit(decoded)
+        alu_res   = Execute(decoded, signals)
+        mem_data  = Mem(alu_res, decoded, signals)
+        Writeback(decoded, signals, alu_res, mem_data)
+
+        if (pc//4) >= len(program): break
 
     print("program terminated")
     print(f"total execution time is {total_clock_cycles} cycles")
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
 
 
         
