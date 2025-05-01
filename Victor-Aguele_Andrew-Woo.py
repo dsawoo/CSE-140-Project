@@ -157,6 +157,17 @@ def Decode(instruction):
 def Execute(decoded, signals):
     global rf, pc, current_instr_pc, branch_target, alu_zero
 
+        # Handle jal
+    if decoded["mnemonic"] == "jal":
+        pc = current_instr_pc + decoded["imm"]
+        return current_instr_pc + 4  # return address (ra)
+
+    # Handle jalr
+    elif decoded["mnemonic"] == "jalr":
+        pc = (rf[decoded["rs1"]] + decoded["imm"]) & ~1
+        return current_instr_pc + 4  # return address (ra)
+
+
     # Select the first operand from the register file (rf) using the register index provided in the decoded instruction.
     if "rs1" in decoded:
         if rf[decoded["rs1"]] == None:
