@@ -174,7 +174,6 @@ def Execute(decoded, signals):
     if signals.get("ALUSrc", 0) == 1:
         operand2 = decoded["imm"]
     else:
-        # ✅ fixed: use list indexing, not rf.get()
         operand2 = rf[decoded["rs2"]] if "rs2" in decoded else 0
 
     # ----- Handle JAL -----
