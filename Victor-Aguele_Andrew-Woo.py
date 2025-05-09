@@ -33,7 +33,7 @@ alu_zero = 0             # ALU Zero Flag: indicates whether the result from the 
 rf = [0] * 32            # 32-entry register file
 d_mem = [0] * 32         # 32-entry data memory; each entry is 4 bytes
 current_instr_pc = 0     # holds the PC of the instruction being executed
-
+filename = ""
 
 DEBUG = False  # Set to False to disable debug prints
 
@@ -258,7 +258,7 @@ def Mem(alu_result, decoded, signals):
 
 #update the register file
 def Writeback(decoded, signals, alu_result, mem_data):
-    global total_clock_cycles, rf, pc
+    global total_clock_cycles, rf, pc, filename
 
     # 1) increment cycle counter
     total_clock_cycles += 1
@@ -274,7 +274,12 @@ def Writeback(decoded, signals, alu_result, mem_data):
     if signals.get("RegWrite", 0) == 1 and decoded.get("rd", None) not in (None, 0):
         rd = decoded["rd"]
         rf[rd] = write_val
-        modifications.append(f"x{rd} is modified to {hex(write_val)}")
+        if filename.endswith("sample_part1.txt"):
+            modifications.append(f"x{rd} is modified to {hex(write_val)}")
+        else:
+            registers = {"x1": "ra", "x10": "a0", "x30": "t5" }
+            convert = "x" + str(rd)
+            modifications.append(f"{registers[convert]} is modified to {hex(write_val)}")
 
     # memory write (sw)
     elif signals.get("MemWrite", 0) == 1:
@@ -398,7 +403,7 @@ def ControlUnit(decoded):
 
 
 def main():
-    global rf, d_mem, pc, total_clock_cycles
+    global rf, d_mem, pc, total_clock_cycles, filename
     filename = input("Enter the program file name to run:\n").strip()
 
     try:
@@ -450,12 +455,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-        
