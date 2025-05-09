@@ -33,9 +33,20 @@ alu_zero = 0             # ALU Zero Flag: indicates whether the result from the 
 rf = [0] * 32            # 32-entry register file
 d_mem = [0] * 32         # 32-entry data memory; each entry is 4 bytes
 current_instr_pc = 0     # holds the PC of the instruction being executed
-filename = ""
+
 
 DEBUG = False  # Set to False to disable debug prints
+# ABI names for x0–x31
+reg_names = {
+    0:  "zero", 1:  "ra",  2:  "sp",  3:  "gp",  4:  "tp",
+    5:  "t0",    6:  "t1",  7:  "t2",  8:  "s0",  9:  "s1",
+    10: "a0",   11:  "a1", 12:  "a2", 13:  "a3", 14:  "a4", 15: "a5",
+    16: "a6",   17:  "a7", 18:  "s2", 19:  "s3", 20:  "s4", 21: "s5",
+    22: "s6",   23:  "s7", 24:  "s8", 25:  "s9", 26: "s10",27: "s11",
+    28: "t3",   29:  "t4", 30:  "t5", 31:  "t6",
+}
+# After reg_names dict, add:
+use_abi_names = True   # default; will override in main()
 
 def Fetch(program):
     global pc, next_pc, branch_target, current_instr_pc
@@ -157,59 +168,39 @@ def Decode(instruction):
 def Execute(decoded, signals):
     global rf, pc, current_instr_pc, branch_target, alu_zero
 
-        # Handle jal
-    if decoded["mnemonic"] == "jal":
-        pc = current_instr_pc + decoded["imm"]
-        return current_instr_pc + 4  # return address (ra)
+    # --- operands ---
+    operand1 = rf[decoded["rs1"]] if "rs1" in decoded else 0
 
-    # Handle jalr
-    elif decoded["mnemonic"] == "jalr":
-        pc = (rf[decoded["rs1"]] + decoded["imm"]) & ~1
-        return current_instr_pc + 4  # return address (ra)
-
-
-    # Select the first operand from the register file (rf) using the register index provided in the decoded instruction.
-    if "rs1" in decoded:
-        if rf[decoded["rs1"]] == None:
-            operand1 = 0
-        else:
-            operand1 = rf[decoded["rs1"]]
-    else:
-        operand1 = 0  # Default if rs1 not present
-
-    # Check if the control signal 'ALUSrc' is active 
-    # If it is active, the second operand will be the immediate value from the decoded instruction.
     if signals.get("ALUSrc", 0) == 1:
         operand2 = decoded["imm"]
     else:
-        # If 'ALUSrc' is not active, use the second register value from the register file.
+        # ✅ fixed: use list indexing, not rf.get()
         operand2 = rf[decoded["rs2"]] if "rs2" in decoded else 0
 
-    if DEBUG:
-        if "rs1" in decoded:
-            print(f"[Execute] Operand1 (rf[{decoded['rs1']}]) = {operand1}")
-        print(f"[Execute] Operand2 = {operand2}")
-
-    # Call the ALU function with the specified operation then store results
-    alu_result = ALU(signals["ALUControl"], operand1, operand2)
-    alu_zero = (alu_result == 0)
-
-    if DEBUG:
-        print(f"[Execute] ALU Operation: {signals['ALUControl']} -> Result = {alu_result}")
-
-    # check if the Branch control signal is active AND if the result of ALU is 0
-    if signals.get("Branch", 0) == 1 and alu_zero == 1:
-        # Calculate the branch target: starting from the current instruction's PC, add 4 (next sequential instruction),
-        # then add the shifted left immediate 
-        branch_target = (current_instr_pc + 4) + (decoded["imm"] << 1)
-        # Update the global program counter (pc) to the branch target address to simulate a jump.
+    # ----- Handle JAL -----
+    if decoded["mnemonic"] == "jal":
+        branch_target = current_instr_pc + decoded["imm"]
         pc = branch_target
-        
-        if DEBUG:
-            print(f"[Execute] Branch taken. New PC = {pc}")
+        return None
 
-    # Return the result from the ALU operation 
+    # ----- Handle JALR -----
+    if decoded["mnemonic"] == "jalr":
+        base = rf[decoded["rs1"]]
+        branch_target = (base + decoded["imm"]) & ~1
+        pc = branch_target
+        return None
+
+    # --- Normal ALU + branch ---
+    alu_result = ALU(signals["ALUControl"], operand1, operand2)
+    alu_zero   = (alu_result == 0)
+
+    if signals.get("Branch", 0) and alu_zero:
+        branch_target = (current_instr_pc + 4) + (decoded["imm"] << 1)
+        pc = branch_target
+
     return alu_result
+
+
 
 
 
@@ -258,51 +249,48 @@ def Mem(alu_result, decoded, signals):
 
 #update the register file
 def Writeback(decoded, signals, alu_result, mem_data):
-    global total_clock_cycles, rf, pc, filename
+    global total_clock_cycles, rf, pc, d_mem, use_abi_names
 
-    # 1) increment cycle counter
     total_clock_cycles += 1
-
-    # 2) figure out what actually got written
-    #    and apply it to rf or d_mem
     modifications = []
 
-    # compute the write-back value (for loads vs. ALU ops)
-    write_val = mem_data if signals.get("MemToReg", 0) == 1 else alu_result
+    # JAL / JALR link write-back
+    if decoded["mnemonic"] in ("jal", "jalr"):
+        rd = decoded.get("rd")
+        retaddr = current_instr_pc + 4
+        if rd not in (None, 0):
+            rf[rd] = retaddr
+            # choose name:
+            name = (reg_names[rd] if use_abi_names else f"x{rd}")
+            modifications.append(f"{name} is modified to {hex(retaddr)}")
 
-    # register write
-    if signals.get("RegWrite", 0) == 1 and decoded.get("rd", None) not in (None, 0):
-        rd = decoded["rd"]
-        rf[rd] = write_val
-        if filename.endswith("sample_part1.txt"):
-            modifications.append(f"x{rd} is modified to {hex(write_val)}")
-        else:
-            registers = {"x1": "ra", "x10": "a0", "x30": "t5" }
-            convert = "x" + str(rd)
-            modifications.append(f"{registers[convert]} is modified to {hex(write_val)}")
+    else:
+        # normal register write-back
+        write_val = mem_data if signals.get("MemToReg", 0) else alu_result
+        rd = decoded.get("rd")
+        if signals.get("RegWrite", 0) and rd not in (None, 0):
+            rf[rd] = write_val
+            name = (reg_names[rd] if use_abi_names else f"x{rd}")
+            modifications.append(f"{name} is modified to {hex(write_val)}")
 
-    # memory write (sw)
-    elif signals.get("MemWrite", 0) == 1:
-        # address is ALU result
-        addr = alu_result
-        # value to store is in rs2
-        val = rf[decoded["rs2"]]
-        # write it
-        index = addr // 4
-        if 0 <= index < len(d_mem):
-            d_mem[index] = val
-            modifications.append(f"memory {hex(addr)} is modified to {hex(val)}")
-        else:
-            print("Memory Write Error: Address out of bounds")
+        # store (sw)
+        if signals.get("MemWrite", 0):
+            addr = alu_result
+            idx  = addr // 4
+            if 0 <= idx < len(d_mem):
+                val = rf[decoded["rs2"]]
+                d_mem[idx] = val
+                modifications.append(f"memory {hex(addr)} is modified to {hex(val)}")
 
-    # 3) always report the new PC
+    # always report PC
     modifications.append(f"pc is modified to {hex(pc)}")
 
-    # 4) print the summary exactly once, in the desired format
+    # print
     print(f"total_clock_cycles {total_clock_cycles} :")
     for m in modifications:
         print(m)
     print()
+
 
 
 
@@ -403,55 +391,53 @@ def ControlUnit(decoded):
 
 
 def main():
-    global rf, d_mem, pc, total_clock_cycles, filename
-    filename = input("Enter the program file name to run:\n").strip()
+    global rf, d_mem, pc, total_clock_cycles, use_abi_names
 
-    try:
-        with open(filename) as f:
-            program = [l.strip() for l in f if l.strip()]
-    except Exception as e:
-        print("Error reading file:", e)
-        return
+    filename = input("Enter the program file name to run:\n")
+    with open(filename) as f:
+        program = [l.strip() for l in f if l.strip()]
 
-    # reset
-    rf    = [0]*32
-    d_mem = [0]*32
+    # ─── reset everything ─────────────────────────────
+    rf = [0] * 32
+    d_mem = [0] * 32
     pc = 0
     total_clock_cycles = 0
 
-    # part1 vs part2 initial state
+    # ─── per–sample initialization ────────────────────
     if filename.endswith("sample_part1.txt"):
-        # s0=0x20, a0=0x70, a1=0x4, plus d_mem for part1
-        rf[8]  = 0x20     # s0
-        rf[10] = 0x70     # a0
-        rf[11] = 0x4      # a1
-        d_mem[28] = 0x5   # at addr 0x70//4
-        d_mem[29] = 0x10  # at addr 0x74//4
+        # sample 1 needs x1=0x20, x2=0x5, a0=0x70, a1=0x4
+        use_abi_names = False
+        rf[1]  = 0x20    # x1
+        rf[2]  = 0x5     # x2
+        rf[10] = 0x70    # a0
+        rf[11] = 0x4     # a1
+        # memory at 0x70/4=28 and 0x74/4=29
+        d_mem[28] = 0x5
+        d_mem[29] = 0x10
 
     else:
-        # sample_part2.txt: s0=0x20, a0=0x5, a1=0x2, a2=0xa, a3=0xf
-        rf[8]  = 0x20     # s0
-        rf[10] = 0x5      # a0
-        rf[11] = 0x2      # a1
-        rf[12] = 0xa      # a2
-        rf[13] = 0xf      # a3
-        # leave d_mem all zeros
+        # sample 2 needs s0,a0,a1,a2,a3
+        use_abi_names = True
+        rf[8]  = 0x20    # s0
+        rf[10] = 0x5     # a0
+        rf[11] = 0x2     # a1
+        rf[12] = 0xa     # a2
+        rf[13] = 0xf     # a3
+        # leave d_mem as zeros
 
-    # run
-    while True:
-        instr = Fetch(program)
-        if (pc//4) > len(program): break
-
-        decoded   = Decode(instr)
-        signals   = ControlUnit(decoded)
-        alu_res   = Execute(decoded, signals)
-        mem_data  = Mem(alu_res, decoded, signals)
+    # ─── run the pipeline ────────────────────────────
+    while (pc // 4) < len(program):
+        instr    = Fetch(program)
+        decoded  = Decode(instr)
+        signals  = ControlUnit(decoded)
+        alu_res  = Execute(decoded, signals)
+        mem_data = Mem(alu_res, decoded, signals)
         Writeback(decoded, signals, alu_res, mem_data)
 
-        if (pc//4) >= len(program): break
-
-    print("program terminated")
+    print("program terminated:")
     print(f"total execution time is {total_clock_cycles} cycles")
+
+
 
 if __name__ == "__main__":
     main()
