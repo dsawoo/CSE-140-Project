@@ -389,6 +389,148 @@ def ControlUnit(decoded):
     return signals
 
 
+def pipeline_Writeback(decoded, signals, alu_res, mem_data):
+    
+    global rf, d_mem, pc, current_instr_pc, use_abi_names
+    modifications = []
+
+    # JAL / JALR link write-back
+    if decoded["mnemonic"] in ("jal", "jalr"):
+        rd = decoded.get("rd")
+        retaddr = current_instr_pc + 4
+        if rd not in (None, 0):
+            rf[rd] = retaddr
+            name = (reg_names[rd] if use_abi_names else f"x{rd}")
+            modifications.append(f"{name} is modified to {hex(retaddr)}")
+
+    # Normal register write-back
+    elif signals.get("RegWrite", 0) == 1:
+        write_val = mem_data if signals.get("MemToReg", 0) else alu_res
+        rd = decoded.get("rd")
+        if rd not in (None, 0):
+            rf[rd] = write_val
+            name = (reg_names[rd] if use_abi_names else f"x{rd}")
+            modifications.append(f"{name} is modified to {hex(write_val)}")
+
+    # Print PC update at commit
+    modifications.append(f"pc is modified to {hex(pc)}")
+
+    # Emit modifications
+    for m in modifications:
+        print(m)
+
+
+def run_pipelined(program, filename):
+    global rf, d_mem, pc, total_clock_cycles, use_abi_names, current_instr_pc, next_pc
+
+    rf = [0] * 32
+    d_mem = [0] * 32
+    pc = 0
+    total_clock_cycles = 0
+
+    if filename.endswith("sample_part1.txt"):
+        use_abi_names = False
+        rf[1]  = 0x20; rf[2]  = 0x5; rf[10] = 0x70; rf[11] = 0x4
+        d_mem[28] = 0x5; d_mem[29] = 0x10
+    else:
+        
+        print("Pipelined mode only supports sample_part1.txt")
+        return
+
+    if_id  = {'nop': True, 'instr': None, 'pc': 0}
+    id_ex  = {'nop': True, 'decoded': None, 'signals': None, 'pc': 0}
+    ex_mem = {'nop': True, 'alu_res': None, 'decoded': None, 'signals': None, 'pc': 0}
+    mem_wb = {'nop': True, 'alu_res': None, 'mem_data': None, 'decoded': None, 'signals': None, 'pc': 0}
+
+    length = len(program)
+
+    while not (if_id['nop'] and id_ex['nop'] and ex_mem['nop'] and mem_wb['nop'] and pc // 4 >= length):
+        # Start of cycle
+        total_clock_cycles += 1
+        print(f"total_clock_cycles {total_clock_cycles} :")
+
+        #Writeback stage 
+        if not mem_wb['nop']:
+            pipeline_Writeback(mem_wb['decoded'], mem_wb['signals'], mem_wb['alu_res'], mem_wb['mem_data'])
+
+        #Memory stage
+        if not ex_mem['nop']:
+            mem_data = Mem(ex_mem['alu_res'], ex_mem['decoded'], ex_mem['signals'])
+            next_mem_wb = {
+                'nop': False,
+                'alu_res': ex_mem['alu_res'],
+                'mem_data': mem_data,
+                'decoded': ex_mem['decoded'],
+                'signals': ex_mem['signals'],
+                'pc': ex_mem['pc']
+            }
+        else:
+            next_mem_wb = {'nop': True, 'alu_res': None, 'mem_data': None, 'decoded': None, 'signals': None, 'pc': 0}
+
+        #Execute stage 
+        if not id_ex['nop']:
+            alu_res = Execute(id_ex['decoded'], id_ex['signals'])
+            next_ex_mem = {
+                'nop': False,
+                'alu_res': alu_res,
+                'decoded': id_ex['decoded'],
+                'signals': id_ex['signals'],
+                'pc': id_ex['pc']
+            }
+        else:
+            next_ex_mem = {'nop': True, 'alu_res': None, 'decoded': None, 'signals': None, 'pc': 0}
+
+        # Decode stage & hazard detection 
+        if not if_id['nop']:
+            decoded_if = Decode(if_id['instr'])
+            signals_if = ControlUnit(decoded_if)
+        else:
+            decoded_if = None
+            signals_if = None
+
+        # Detect load-use hazard
+        stall = False
+        if (not id_ex['nop'] and id_ex['signals'].get("MemRead", 0) == 1 and
+            id_ex['decoded'].get('rd') in (decoded_if.get('rs1') if decoded_if else None,
+                                          decoded_if.get('rs2') if decoded_if else None)):
+            stall = True
+
+        # Prepare next ID/EX and IF/ID
+        if stall:
+            next_id_ex = {'nop': True, 'decoded': None, 'signals': None, 'pc': 0}
+            next_if_id = if_id  # freeze fetch
+            # Keep PC unchanged
+        else:
+            # Normal decode -> ID/EX
+            if not if_id['nop']:
+                next_id_ex = {
+                    'nop': False,
+                    'decoded': decoded_if,
+                    'signals': signals_if,
+                    'pc': if_id['pc']
+                }
+            else:
+                next_id_ex = {'nop': True, 'decoded': None, 'signals': None, 'pc': 0}
+            # Fetch next instruction -> IF/ID
+            if pc // 4 < length:
+                instr = Fetch(program)
+                next_if_id = {'nop': False, 'instr': instr, 'pc': current_instr_pc}
+                # advance PC
+                pc = next_pc
+            else:
+                next_if_id = {'nop': True, 'instr': None, 'pc': 0}
+
+        # --- Advance pipeline registers ---
+        if_id  = next_if_id
+        id_ex  = next_id_ex
+        ex_mem = next_ex_mem
+        mem_wb = next_mem_wb
+
+        print()  # blank line
+
+    print("program terminated!")
+
+
 def main():
     global rf, d_mem, pc, total_clock_cycles, use_abi_names
 
@@ -396,47 +538,34 @@ def main():
     with open(filename) as f:
         program = [l.strip() for l in f if l.strip()]
 
-    # ─── reset everything ─────────────────────────────
-    rf = [0] * 32
-    d_mem = [0] * 32
-    pc = 0
-    total_clock_cycles = 0
-
-    # ─── per–sample initialization ────────────────────
-    if filename.endswith("sample_part1.txt"):
-        # sample 1 needs x1=0x20, x2=0x5, a0=0x70, a1=0x4
-        use_abi_names = False
-        rf[1]  = 0x20    # x1
-        rf[2]  = 0x5     # x2
-        rf[10] = 0x70    # a0
-        rf[11] = 0x4     # a1
-        # memory at 0x70/4=28 and 0x74/4=29
-        d_mem[28] = 0x5
-        d_mem[29] = 0x10
-
+    mode = input("Select mode: (s)ingle-cycle or (p)ipelined?\n").strip().lower()
+    if mode.startswith('p'):
+        run_pipelined(program, filename)
     else:
-        # sample 2 needs s0,a0,a1,a2,a3
-        use_abi_names = True
-        rf[8]  = 0x20    # s0
-        rf[10] = 0x5     # a0
-        rf[11] = 0x2     # a1
-        rf[12] = 0xa     # a2
-        rf[13] = 0xf     # a3
-        # leave d_mem as zeros
+        
+        rf = [0] * 32
+        d_mem = [0] * 32
+        pc = 0
+        total_clock_cycles = 0
 
-    # ─── run the pipeline ────────────────────────────
-    while (pc // 4) < len(program):
-        instr    = Fetch(program)
-        decoded  = Decode(instr)
-        signals  = ControlUnit(decoded)
-        alu_res  = Execute(decoded, signals)
-        mem_data = Mem(alu_res, decoded, signals)
-        Writeback(decoded, signals, alu_res, mem_data)
+        if filename.endswith("sample_part1.txt"):
+            use_abi_names = False
+            rf[1]  = 0x20; rf[2]  = 0x5; rf[10] = 0x70; rf[11] = 0x4
+            d_mem[28] = 0x5; d_mem[29] = 0x10
+        else:
+            use_abi_names = True
+            
 
-    print("program terminated:")
-    print(f"total execution time is {total_clock_cycles} cycles")
+        while pc // 4 < len(program):
+            instr    = Fetch(program)
+            decoded  = Decode(instr)
+            signals  = ControlUnit(decoded)
+            alu_res  = Execute(decoded, signals)
+            mem_data = Mem(alu_res, decoded, signals)
+            Writeback(decoded, signals, alu_res, mem_data)
 
-
+        print("program terminated:")
+        print(f"total execution time is {total_clock_cycles} cycles")
 
 if __name__ == "__main__":
     main()
