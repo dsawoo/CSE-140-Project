@@ -448,10 +448,11 @@ def run_pipelined(program, filename):
     while not (if_id['nop'] and id_ex['nop'] and ex_mem['nop'] and mem_wb['nop'] and pc // 4 >= length):
         # Start of cycle
         total_clock_cycles += 1
-        print(f"total_clock_cycles {total_clock_cycles} :")
 
         #Writeback stage 
         if not mem_wb['nop']:
+            print()  # blank line
+            print(f"total_clock_cycles {total_clock_cycles} :")
             pipeline_Writeback(mem_wb['decoded'], mem_wb['signals'], mem_wb['alu_res'], mem_wb['mem_data'])
 
         #Memory stage
@@ -527,9 +528,7 @@ def run_pipelined(program, filename):
         ex_mem = next_ex_mem
         mem_wb = next_mem_wb
 
-        print()  # blank line
-
-    print("program terminated!")
+    print("\nprogram terminated!")
 
 
 def main():
