@@ -35,7 +35,7 @@ d_mem = [0] * 32         # 32-entry data memory; each entry is 4 bytes
 current_instr_pc = 0     # holds the PC of the instruction being executed
 
 
-DEBUG = False  # Set to False to disable debug prints
+DEBUG = False  
 # ABI names for x0–x31
 reg_names = {
     0:  "zero", 1:  "ra",  2:  "sp",  3:  "gp",  4:  "tp",
@@ -45,33 +45,25 @@ reg_names = {
     22: "s6",   23:  "s7", 24:  "s8", 25:  "s9", 26: "s10",27: "s11",
     28: "t3",   29:  "t4", 30:  "t5", 31:  "t6",
 }
-# After reg_names dict, add:
-use_abi_names = True   # default; will override in main()
+
+use_abi_names = True  
 
 def Fetch(program):
     global pc, next_pc, branch_target, current_instr_pc
 
     # Store the current value of the program counter in current_instr_pc.
     current_instr_pc = pc
-    
-    # Compute the next instruction's address by adding 4 to the current PC.
-    # Instructions are 4 bytes long, so we increment by 4.
     next_pc = pc + 4
-    
-    # Fetch the instruction from the program using the current program counter.
-    # Since pc is in bytes, dividing by 4 converts it to the correct index in the program list.
     instruction = program[pc // 4]
     
     if DEBUG:
         print(f"[Fetch] PC = {pc} -> Fetched Instruction: {instruction}")
     
-    # Update the global program counter to the next instruction's address.
     pc = next_pc
     
     if DEBUG:
         print(f"[Fetch] Updated PC = {pc}")
-    
-    # Return the fetched instruction 
+        
     return instruction
 
 
@@ -167,30 +159,26 @@ def Decode(instruction):
 #handles acutal computation specified by the instruction
 def Execute(decoded, signals):
     global rf, pc, current_instr_pc, branch_target, alu_zero
-
-    # --- operands ---
     operand1 = rf[decoded["rs1"]] if "rs1" in decoded else 0
 
     if signals.get("ALUSrc", 0) == 1:
         operand2 = decoded["imm"]
     else:
-        # ✅ fixed: use list indexing, not rf.get()
         operand2 = rf[decoded["rs2"]] if "rs2" in decoded else 0
 
-    # ----- Handle JAL -----
+    # Handle JAL 
     if decoded["mnemonic"] == "jal":
         branch_target = current_instr_pc + decoded["imm"]
         pc = branch_target
         return None
 
-    # ----- Handle JALR -----
+    # Handle JALR 
     if decoded["mnemonic"] == "jalr":
         base = rf[decoded["rs1"]]
         branch_target = (base + decoded["imm"]) & ~1
         pc = branch_target
         return None
 
-    # --- Normal ALU + branch ---
     alu_result = ALU(signals["ALUControl"], operand1, operand2)
     alu_zero   = (alu_result == 0)
 
@@ -210,19 +198,14 @@ def Mem(alu_result, decoded, signals):
 
     # Check if the instruction involves a memory read operation (lw).
     if signals.get("MemRead", 0) == 1:
-        # Calculate the memory index from the effective address.
-        # Since each memory entry is 4 bytes, divide by 4 
         index = alu_result // 4
         
-        # Ensure that the computed index is within the bounds of the data memory array.
         if 0 <= index < len(d_mem):
-            # Read the data stored at the computed index in memory.
             data = d_mem[index]
             
             if DEBUG:
                 print(f"[Mem] lw: Reading data {data} from memory index {index}")
                 
-            # Return the read data to be used in the Writeback stage.
             return data
         else:
             print("Memory Read Error: Address out of bounds")
@@ -230,12 +213,8 @@ def Mem(alu_result, decoded, signals):
 
     # If the instruction is a memory write (sw) 
     elif signals.get("MemWrite", 0) == 1:
-        # Calculate the memory index using the ALU result, the same way as for memory reads.
         index = alu_result // 4
-        
-        # Check if the calculated index is within the valid range of memory addresses.
         if 0 <= index < len(d_mem):
-            # Write data to the memory: take the value from the source register (rs2) in the decoded instruction.
             d_mem[index] = rf[decoded["rs2"]]
             
             if DEBUG:
@@ -243,8 +222,7 @@ def Mem(alu_result, decoded, signals):
         else:
             
             print("Memory Write Error: Address out of bounds")
-    
-    # Return None if no memory operation is performed.
+
     return None
 
 #update the register file
@@ -260,7 +238,6 @@ def Writeback(decoded, signals, alu_result, mem_data):
         retaddr = current_instr_pc + 4
         if rd not in (None, 0):
             rf[rd] = retaddr
-            # choose name:
             name = (reg_names[rd] if use_abi_names else f"x{rd}")
             modifications.append(f"{name} is modified to {hex(retaddr)}")
 
@@ -285,7 +262,6 @@ def Writeback(decoded, signals, alu_result, mem_data):
     # always report PC
     modifications.append(f"pc is modified to {hex(pc)}")
 
-    # print
     print(f"total_clock_cycles {total_clock_cycles} :")
     for m in modifications:
         print(m)
@@ -294,38 +270,23 @@ def Writeback(decoded, signals, alu_result, mem_data):
 
 
 
-
-
-
-
 def ALU(op, operand1, operand2):
     global alu_zero
-    # Initialize the result to 0.
     result = 0
 
-    # Check the operation type specified by 'op'.
     if op == "add":
-        # If the operation is addition, add operand1 and operand2.
         result = operand1 + operand2
     elif op == "sub":
-        # For subtraction, subtract operand2 from operand1.
         result = operand1 - operand2
-        
-        # Set the alu_zero flag to 1 if the result is zero, else set it to 0.
-        # This is used to determine equality (for example, in branch instructions like beq).
         alu_zero = 1 if result == 0 else 0
         
     elif op == "and":
-        # For logical AND, perform bitwise AND on operand1 and operand2.
         result = operand1 & operand2
     elif op == "or":
-        # For logical OR, perform bitwise OR on operand1 and operand2.
         result = operand1 | operand2
     else:
-        # If the operation is not supported, print an error message.
         print("ALU: Unsupported operation", op)
     
-    # Return the computed result.
     return result
 
 
@@ -451,7 +412,7 @@ def run_pipelined(program, filename):
 
         #Writeback stage 
         if not mem_wb['nop']:
-            print()  # blank line
+            print()  
             print(f"total_clock_cycles {total_clock_cycles} :")
             pipeline_Writeback(mem_wb['decoded'], mem_wb['signals'], mem_wb['alu_res'], mem_wb['mem_data'])
 
@@ -522,7 +483,6 @@ def run_pipelined(program, filename):
             else:
                 next_if_id = {'nop': True, 'instr': None, 'pc': 0}
 
-        # --- Advance pipeline registers ---
         if_id  = next_if_id
         id_ex  = next_id_ex
         ex_mem = next_ex_mem
