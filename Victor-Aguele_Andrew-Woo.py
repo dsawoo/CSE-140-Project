@@ -394,9 +394,16 @@ def run_pipelined(program, filename):
         use_abi_names = False
         rf[1]  = 0x20; rf[2]  = 0x5; rf[10] = 0x70; rf[11] = 0x4
         d_mem[28] = 0x5; d_mem[29] = 0x10
+    elif filename.endswith("sample_part2.txt"):
+        use_abi_names = True
+        rf[8]  = 0x20
+        rf[10] = 0x5
+        rf[11] = 0x2
+        rf[12] = 0xa
+        rf[13] = 0xf
+        # d_mem stays all zeros
     else:
-        
-        print("Pipelined mode only supports sample_part1.txt")
+        print("Pipelined mode only supports sample_part1.txt and sample_part2.txt")
         return
 
     if_id  = {'nop': True, 'instr': None, 'pc': 0}
@@ -494,11 +501,14 @@ def run_pipelined(program, filename):
 def main():
     global rf, d_mem, pc, total_clock_cycles, use_abi_names
 
-    filename = input("Enter the program file name to run:\n")
+    
+    mode = input("Select mode: (s)ingle-cycle or (p)ipelined?\n").strip().lower()
+    
+    filename = input("Enter the program file name to run:\n\n")
+    print()
     with open(filename) as f:
         program = [l.strip() for l in f if l.strip()]
 
-    mode = input("Select mode: (s)ingle-cycle or (p)ipelined?\n").strip().lower()
     if mode.startswith('p'):
         run_pipelined(program, filename)
     else:
@@ -512,9 +522,17 @@ def main():
             use_abi_names = False
             rf[1]  = 0x20; rf[2]  = 0x5; rf[10] = 0x70; rf[11] = 0x4
             d_mem[28] = 0x5; d_mem[29] = 0x10
+        elif filename.endswith("sample_part2.txt"):
+            use_abi_names = True
+            # s0 = x8, a0 = x10, a1 = x11, a2 = x12, a3 = x13
+            rf[8]  = 0x20  # s0
+            rf[10] = 0x5   # a0
+            rf[11] = 0x2   # a1
+            rf[12] = 0xa   # a2
+            rf[13] = 0xf   # a3
+            # d_mem is already zeroed
         else:
             use_abi_names = True
-            
 
         while pc // 4 < len(program):
             instr    = Fetch(program)
@@ -529,3 +547,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+    
+    
+
